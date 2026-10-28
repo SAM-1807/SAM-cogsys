@@ -1,4 +1,3 @@
-cat > README.md << 'EOF'
 # SAM_CogSys
 
 An AI psychometric game engine written in C and Python.
@@ -9,7 +8,7 @@ contains the pre-hackathon baseline for the BUILDUP UNIZIK hackathon
 
 The project began as a terminal-based number guessing game. The original
 terminal version and its full git history can be found here:
-YOUR-ORIGINAL-REPO-URL
+https://github.com/SAM-1807/my_number_guessing_game
 
 ## How it works
 
