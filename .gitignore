@@ -1,0 +1,6 @@
+guess_game
+*.o
+venv/
+__pycache__/
+*.so
+.env
