@@ -23,39 +23,39 @@ metrics.
 - **distance_vector** shows the absolute difference from the secret
 
 Difficulty levels are 1 (100 range, 7 trials), 2 (500 range, 9 trials),
-           and 3 (1000 range, 10 trials). An invalid difficulty returns a struct
-           with game_status set to -1.
+and 3 (1000 range, 10 trials). An invalid difficulty returns a struct
+with game_status set to -1.
 
 ## Building
 
-           Requires `gcc`, `make`, and `python3`.
+    Requires `gcc`, `make`, and `python3`.
 
-           make
+    make
 
-           To clean up the build:
+    To clean up the build:
 
-           make clean
+    make clean
 
 ## Running tests
 
-           make test
+    make test
 
 ## Project structure
 
-           game.c          C engine: init_game, process_turn, telemetry
-           game.h          Struct definition and function prototypes
-           bridge.py       ctypes bridge mapping the C struct to Python
-           test_engine.py  71 checks for bounds, wins, losses, and penalties
-           Makefile        Build rules for libgame.so and tests
+    game.c          C engine: init_game, process_turn, telemetry
+    game.h          Struct definition and function prototypes
+    bridge.py       ctypes bridge mapping the C struct to Python
+    test_engine.py  71 checks for bounds, wins, losses, and penalties
+    Makefile        Build rules for libgame.so and tests
 
 ## Implementation notes
 
-           - Standard C99, compiled with `-Wall -Wextra -Wpedantic -std=c99`
-           - Stateless library design; all game state is passed in and out via
-           the GameTelemetry struct
-           - Python validates the game_status before processing turns
+    - Standard C99, compiled with `-Wall -Wextra -Wpedantic -std=c99`
+    - Stateless library design; all game state is passed in and out via
+      the GameTelemetry struct
+    - Python validates the game_status before processing turns
     - The Streamlit UI, Gemini AI integration, and deployment will be
-built during the hackathon window (Nov 2-7)
+      built during the hackathon window (Nov 2-7)
 
 ## Author
 
