@@ -100,6 +100,10 @@ static void narrow_window(int guess, GameTelemetry *metrics)
 	new_window = metrics->current_max - metrics->current_min + 1;
 	metrics->space_velocity =
 		((old_window - new_window) * 100) / old_window;
+
+	/* A legal guess always removes at least one number. */
+	if (metrics->space_velocity == 0)
+		metrics->space_velocity = 1;
 }
 
 /**

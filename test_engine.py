@@ -250,6 +250,15 @@ secrets = {new_game(3).secret_number for _ in range(30)}
 check("T13 secrets differ between games started back to back",
       len(secrets) > 1, secrets)
 
+# T14: a legal guess never reports velocity 0
+t = new_game(3)
+t.secret_number = 500
+s = turn(t, 1000)              # legal edge guess: removes only 1 of 1000 numbers
+check("T14 legal edge guess: velocity >= 1, no entropy flag",
+      s["space_velocity"] >= 1 and s["logical_entropy"] == 0, s)
+check("T14 illegal guess still reports velocity 0",
+      turn(new_game(3), 2000)["space_velocity"] == 0)
+
 # ------------------------------------------------------------ summary
 print(f"\n{sum(results)}/{len(results)} checks passed")
 sys.exit(0 if all(results) else 1)
