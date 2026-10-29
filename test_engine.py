@@ -259,6 +259,16 @@ check("T14 legal edge guess: velocity >= 1, no entropy flag",
 check("T14 illegal guess still reports velocity 0",
       turn(new_game(3), 2000)["space_velocity"] == 0)
 
+# T15: extreme guesses do not overflow distance_vector
+t = new_game(1)
+t.secret_number = 50
+s = turn(t, 2147483647)        # INT_MAX: distance fits in int, exact value
+check("T15 INT_MAX guess: distance is |secret - guess|, no wrap",
+      s["distance_vector"] == 2147483647 - 50, s)
+s = turn(t, -2147483648)       # INT_MIN: true distance exceeds INT_MAX, clamps
+check("T15 INT_MIN guess: distance clamps to INT_MAX",
+      s["distance_vector"] == 2147483647, s)
+
 # ------------------------------------------------------------ summary
 print(f"\n{sum(results)}/{len(results)} checks passed")
 sys.exit(0 if all(results) else 1)

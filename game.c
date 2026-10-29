@@ -116,22 +116,27 @@ static void narrow_window(int guess, GameTelemetry *metrics)
  */
 void process_turn(int guess, GameTelemetry *metrics)
 {
-	if (metrics == NULL || metrics->game_status != 0)
-		return;
+        if (metrics == NULL || metrics->game_status != 0)
+                return;
 
-	metrics->last_guess = guess;
-	metrics->logical_entropy = 0;
-	metrics->space_velocity = 0;
-	metrics->distance_vector = abs(guess - metrics->secret_number);
-	metrics->trials_remaining--;
+        metrics->last_guess = guess;
+        metrics->logical_entropy = 0;
+        metrics->space_velocity = 0;
+        {
+                long long diff = (long long)guess - (long long)metrics->secret_number;
+                long long mag = diff < 0 ? -diff : diff;
 
-	if (guess < metrics->current_min || guess > metrics->current_max)
-		metrics->logical_entropy = 1;
-	else
-		narrow_window(guess, metrics);
+                metrics->distance_vector = (int)(mag > 2147483647LL ? 2147483647LL : mag);
+        }
+        metrics->trials_remaining--;
 
-	if (guess == metrics->secret_number)
-		metrics->game_status = 1;
-	else if (metrics->trials_remaining <= 0)
-		metrics->game_status = 2;
+        if (guess < metrics->current_min || guess > metrics->current_max)
+                metrics->logical_entropy = 1;
+        else
+                narrow_window(guess, metrics);
+
+        if (guess == metrics->secret_number)
+                metrics->game_status = 1;
+        else if (metrics->trials_remaining <= 0)
+                metrics->game_status = 2;
 }
