@@ -57,13 +57,14 @@ SCENARIOS = {
             ],
         }
 SECRET = 34
-
+import os
+PLAYER_NAME = os.environ.get("PLAYER_NAME", "SAM")
 
 def main():
     call_model = make_call_model()
     for name, history in SCENARIOS.items():
         start = time.time()
-        reply = cl.get_reply(history, 100, SECRET, "SAM", call_model)
+        reply = cl.get_reply(history, 100, SECRET, PLAYER_NAME, call_model)
         elapsed = time.time() - start
         print(f"== {name}: source={reply['source']} theme={reply['theme']} "
               f"time={elapsed:.1f}s")

@@ -105,7 +105,7 @@ Output rules:
    2 to 3 sentences, at most 420 characters, describing the WHOLE sequence: how
    consistently the player halved the range, how many guesses were illegal, and
    one concrete tip. You may state the secret number then.
-5. Use player_name at most once, and only when phase is "won" or "lost".
+5. Address the player as "you". Use player_name at most once, but only when phase is "won" or "lost". If player_name is null, do not use a name at all.
 6. While playing, never state or hint at the secret number, and never use the
    name "SAM".
 7. Describe only what the data shows. Do not guess why the player played that way.
