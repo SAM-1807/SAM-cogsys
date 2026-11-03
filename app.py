@@ -6,6 +6,7 @@ Messages come from the local rule-based engine; Gemini is an optional switch (of
 """
 import ctypes
 import os
+import subprocess
 
 import streamlit as st
 
@@ -15,6 +16,25 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 LIB = os.path.join(HERE, "libgame.so")
 SOURCE = os.path.join(HERE, "game.c")
 
+def build_library():
+    """Try to compile libgame.so. Return an error text, or None on success."""
+    try:
+        build = subprocess.run(["gcc", "-shared", "-fPIC", "-o", LIB, SOURCE],
+                               capture_output=True, text=True)
+    except OSError as err:                    # gcc is not installed on this host
+        return f"gcc not available: {err}"
+    return None if build.returncode == 0 else build.stderr
+
+
+# Rebuild when the library is missing or older than game.c. If the rebuild fails
+# (no compiler, compile error) but a prebuilt libgame.so exists, keep using it.
+lib_existed = os.path.exists(LIB)
+if not lib_existed or os.path.getmtime(LIB) < os.path.getmtime(SOURCE):
+    build_error = build_library()
+    if build_error and not lib_existed:
+        st.error("Could not compile libgame.so and no prebuilt copy exists.")
+        st.code(build_error)
+        st.stop()
 
 # On a host, copy the Gemini key from the platform's secrets into the environment.
 try:

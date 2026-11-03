@@ -24,7 +24,7 @@ except ImportError:          # python-dotenv is optional if the variable is alre
     pass
 
 # CHECK: pick the order after running compare_models.py on YOUR key.
-DEFAULT_MODELS = ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-2.5-flash"]
+DEFAULT_MODELS = ["gemini-3.5-flash-lite"]
 TIMEOUT_SECONDS = 8          # total budget for one reply, across all models
 PER_MODEL_SECONDS = 5        # cap for a single model attempt
 
