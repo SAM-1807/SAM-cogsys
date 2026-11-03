@@ -112,6 +112,72 @@ def show_reply(reply):
         st.markdown(reply["game_summary"])
 
 
+def optimal_path(level, secret):
+    """Guesses a perfect midpoint search would make for this secret.
+
+    Uses the real engine with a throwaway game, so the bot plays by the same rules.
+    """
+    bot = new_game(level)
+    bot.secret_number = secret
+    guesses = []
+    while bot.game_status == 0 and len(guesses) < 50:
+        guess = (bot.current_min + bot.current_max) // 2
+        lib.process_turn(guess, ctypes.byref(bot))
+        guesses.append(guess)
+    return guesses if bot.game_status == 1 else None
+
+
+def plural(count, word="turn"):
+    return f"{count} {word}" + ("" if count == 1 else "s")
+
+
+def show_ghost_bot(game, history, level):
+    """Compare the player's path with a perfect midpoint search for the same secret."""
+    optimal = optimal_path(level, game.secret_number)
+    if optimal is None:
+        return
+    mine = len(history)
+    wasted = sum(1 for record in history if not record["legal"])
+
+    st.subheader("Optimal path vs your path")
+    left, right = st.columns(2)
+    left.metric("Optimal Path", plural(len(optimal)))
+    right.metric("Your Path", plural(mine))
+    st.caption("Optimal = a perfect halving search that does not know the number in advance.")
+
+    if game.game_status == 1:
+        gap = mine - len(optimal)
+        if gap < 0:
+            st.success("You found it faster than a perfect search would. Excellent.")
+        elif gap == 0:
+            st.success("You matched the optimal path.")
+        else:
+            st.info(f"You were {plural(gap)} over the optimal path.")
+    else:
+        numbers_left = game.current_max - game.current_min + 1
+        message = (f"You ran out of trials after {plural(mine)}. A perfect search finds "
+                   f"this number in {plural(len(optimal))}. When your trials ended, "
+                   f"{numbers_left} numbers were still possible.")
+        if mine > len(optimal):
+            message += f" That is {plural(mine - len(optimal))} more than the optimal path."
+        st.info(message)
+
+    st.caption(f"Efficient turns (inside your range): {mine - wasted} | "
+               f"Wasted turns (outside your range): {wasted}")
+
+    with st.expander("See the optimal path"):
+        rows = []
+        for index in range(max(len(optimal), mine)):
+            bot_guess = str(optimal[index]) if index < len(optimal) else "-"
+            if index < mine:
+                record = history[index]
+                yours = str(record["guess"]) + ("" if record["legal"] else " (wasted)")
+            else:
+                yours = "-"
+            rows.append({"Turn": index + 1, "Optimal bot": bot_guess, "You": yours})
+        st.dataframe(rows, hide_index=True)
+
+
 # ---------------------------------------------------------------- state
 if "level" not in st.session_state:
     st.session_state.level = "Easy"
@@ -155,6 +221,7 @@ if st.session_state.reply:
 
 if game.game_status in (1, 2):
     st.write(f"The number was **{game.secret_number}**.")
+    show_ghost_bot(game, history, LEVELS[st.session_state.level])
     st.write("Press **New game** in the sidebar to play again.")
 
 left, middle, right = st.columns(3)
