@@ -1,8 +1,9 @@
-"""app.py - SAM_CogSys: functional game loop.
+"""app.py - SAM_CogSys: game loop with a rules gate.
 
 Run locally:   streamlit run app.py
-Not in this version (planned): Naija persona, custom CSS themes, typewriter animation.
-Messages come from the local rule-based engine; Gemini is an optional switch (off by default).
+Flow: rules screen (difficulty, name, Start Game) -> game -> end screen (Play Again).
+Not in this version (planned): custom CSS themes, Naija persona, Pressure Mode timer.
+Messages come from the local rule-based engine; Gemini is an optional sidebar switch.
 """
 import ctypes
 import os
@@ -15,6 +16,7 @@ st.set_page_config(page_title="SAM_CogSys", page_icon="🧠")
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIB = os.path.join(HERE, "libgame.so")
 SOURCE = os.path.join(HERE, "game.c")
+
 
 def build_library():
     """Try to compile libgame.so. Return an error text, or None on success."""
@@ -48,6 +50,16 @@ import cogsys_logic as cl  # noqa: E402
 
 LEVELS = {"Easy": 1, "Medium": 2, "Hard": 3}
 
+# Session state used by this app. Two kinds, on purpose:
+#   settings (plain keys, always present):  has_started, level, player_name, show_range
+#   widget keys (only exist while their widget is on screen): level_choice,
+#   name_choice, range_choice (rules screen), use_gemini (sidebar)
+# Streamlit deletes a widget's state when the widget is not drawn, so the game
+# page only ever reads the plain settings, which begin_game() copies from the widgets.
+for _key, _default in (("has_started", False), ("level", "Easy"),
+                       ("player_name", ""), ("show_range", False)):
+    st.session_state.setdefault(_key, _default)
+
 
 # ---------------------------------------------------------------- helpers
 def snap(game):
@@ -59,6 +71,64 @@ def start_new_game():
     st.session_state.history = []
     st.session_state.rows = []
     st.session_state.reply = None
+
+
+def begin_game():
+    """Start Game button: copy the rules-screen choices, build a game, open the game page."""
+    state = st.session_state
+    state.level = state.get("level_choice", state.level)
+    state.player_name = (state.get("name_choice", state.player_name) or "").strip()
+    state.show_range = bool(state.get("range_choice", state.show_range))
+    start_new_game()
+    state.has_started = True
+
+
+def back_to_rules():
+    """New game / Play Again: return to the rules screen (the previous choices are kept)."""
+    st.session_state.has_started = False
+
+
+@st.cache_data
+def level_info():
+    """Range and trials per level, read from the engine so the rules never drift from it."""
+    info = {}
+    for name, level in LEVELS.items():
+        probe = new_game(level)
+        info[name] = (probe.range_max, probe.trials_remaining)
+    return info
+
+
+def show_footer():
+    st.markdown(
+            "<div style='text-align: center; color: #888888; font-size: 0.8rem; "
+            "padding-top: 2rem;'>Developed by SAM</div>",
+            unsafe_allow_html=True)
+
+
+def show_rules():
+    st.title("SAM_CogSys")
+    st.caption("Guess the number. The engine measures how efficiently you search.")
+    with st.container(border=True):
+        st.subheader("How to play")
+        st.markdown(
+                "1. The game picks a secret number. Find it before your trials run out.\n"
+                "2. Every guess costs one trial. After each guess you see \"Too low\" "
+                "or \"Too high\".\n"
+                "3. **Penalty:** a guess outside the range you have already narrowed "
+                "down is wasted. It costs a trial and teaches you nothing.\n"
+                "4. After each guess, a message reacts to how well you searched.\n"
+                "5. At the end, your path is compared with a perfect halving search "
+                "for the same number.")
+        st.markdown("\n".join(
+            f"- **{name}:** numbers 1 to {top}, {trials} trials"
+            for name, (top, trials) in level_info().items()))
+        st.selectbox("Difficulty", list(LEVELS),
+                     index=list(LEVELS).index(st.session_state.level), key="level_choice")
+        st.text_input("Your name (optional)", value=st.session_state.player_name,
+                      key="name_choice")
+        st.checkbox("Show my possible range (easier)", value=st.session_state.show_range,
+                    key="range_choice")
+        st.button("Start Game", type="primary", on_click=begin_game)
 
 
 @st.cache_resource
@@ -178,29 +248,32 @@ def show_ghost_bot(game, history, level):
         st.dataframe(rows, hide_index=True)
 
 
-# ---------------------------------------------------------------- state
-if "level" not in st.session_state:
-    st.session_state.level = "Easy"
-if "game" not in st.session_state:
-    start_new_game()
-
+# ---------------------------------------------------------------- sidebar
 with st.sidebar:
-    st.header("Game")
-    st.selectbox("Difficulty", list(LEVELS), key="level", on_change=start_new_game)
-    st.text_input("Your name (optional)", key="player_name")
-    st.checkbox("Show possible range", key="show_range")
+    st.header("Options")
     st.checkbox("Use Gemini for messages", key="use_gemini")
-    st.button("New game", on_click=start_new_game)
+    if st.session_state.has_started:
+        st.caption(f"Difficulty: {st.session_state.level}")
+        st.button("New game", on_click=back_to_rules)
 
+# ---------------------------------------------------------------- rules gate
+if not st.session_state.has_started:
+    show_rules()
+    show_footer()
+    st.stop()
+
+if "game" not in st.session_state:          # safety net: started, but no game object yet
+    start_new_game()
 game = st.session_state.game
 history = st.session_state.history
 
-# ---------------------------------------------------------------- page
+# ---------------------------------------------------------------- game page
 st.title("SAM_CogSys")
 st.caption("Guess the number. The engine measures how you search.")
 
 if game.game_status == -1:                  # cannot happen from the selector; kept as a guard
     st.error("The engine reported an invalid difficulty.")
+    show_footer()
     st.stop()
 
 if game.game_status == 0:
@@ -222,12 +295,12 @@ if st.session_state.reply:
 if game.game_status in (1, 2):
     st.write(f"The number was **{game.secret_number}**.")
     show_ghost_bot(game, history, LEVELS[st.session_state.level])
-    st.write("Press **New game** in the sidebar to play again.")
+    st.button("Play Again", type="primary", on_click=back_to_rules)
 
 left, middle, right = st.columns(3)
 left.metric("Trials left", game.trials_remaining)
 middle.metric("Guesses made", len(history))
-if st.session_state.get("show_range") and game.game_status == 0:
+if st.session_state.show_range and game.game_status == 0:
     right.metric("Possible range", f"{game.current_min} to {game.current_max}")
 
 if st.session_state.rows:
@@ -239,3 +312,5 @@ with st.expander("Engine telemetry"):
     if game.game_status == 0:
         data.pop("secret_number")           # never show the secret while playing
     st.json({"engine_struct": data, "last_turn": history[-1] if history else None})
+
+show_footer()
