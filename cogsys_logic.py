@@ -50,13 +50,14 @@ def choose_theme(game_status, logical_entropy, proximity_score):
     return "green"
 
 
-def make_turn_record(before, after):
+def make_turn_record(before, after, timed_out=False):
     """Build one history entry from struct snapshots taken around a turn."""
     window_before = before["current_max"] - before["current_min"] + 1
     proximity = compute_proximity(after["distance_vector"], window_before)
     return {
             "guess": after["last_guess"],
             "legal": after["logical_entropy"] == 0,
+            "timed_out": timed_out,
             "window_before": window_before,
             "velocity": after["space_velocity"],
             "proximity": proximity,
@@ -92,6 +93,10 @@ Fields:
   - proximity: 0 to 100, how close the guess was to the secret compared with
     window_before. 100 is exact. 90 or more is very close.
   - trials_remaining: trials left after this guess.
+  - timed_out: true means the player ran out of time and the game submitted a
+    guess of 0 automatically. legal is false for it, but it is NOT an illegal
+    guess by the player. Never call it illegal or outside the range. It cost
+    one trial.
 - secret_number and player_name appear only when the game is over.
 
 Output rules:
@@ -103,7 +108,9 @@ Output rules:
    message. Never use the name while playing. Pick the tone from
    theme_chosen_by_engine and the LAST history entry. These describe the vibe;
    never copy their wording:
-   - crimson: strict. The guess was outside the range and wasted a trial.
+      - crimson: strict. If the last entry has timed_out true: the time ran out
+     and a trial was lost (never call it an illegal guess). Otherwise the
+     guess was outside the range and wasted a trial.
    - gold: encouraging. Very close. Tell the player to check the middle of
      their range. Do not state or hint at the number.
    - green and last velocity is 40 or more: sharp approval. The guess cut the
@@ -115,7 +122,9 @@ Output rules:
    2 to 3 sentences, at most 420 characters, in the same mentor voice,
    describing the WHOLE sequence: how consistently the player halved the range
    and one concrete tip. Mention illegal guesses ONLY if at least one history
-   entry has legal false. If phase is "won": celebratory. If phase is "lost":
+   entry has legal false and timed_out false. Mention time-outs ONLY if at
+   least one entry has timed_out true, and count them separately from illegal
+   guesses. If phase is "won": celebratory. If phase is "lost":
    constructive, not harsh. You may state the secret number then. In this case
    ai_message is a short celebratory (won) or constructive (lost) line.
 5. Address the player as "you". Use player_name at most once, but only when phase is "won" or "lost". If player_name is null, do not use a name at all.
@@ -134,7 +143,7 @@ def build_payload(history, range_max, secret_number=None, player_name=None):
             "theme_chosen_by_engine": last["theme"],
             "history": [
                 {key: rec[key] for key in
-                 ("guess", "legal", "window_before", "velocity", "proximity",
+                 ("guess", "legal", "timed_out", "window_before", "velocity", "proximity",
                   "trials_remaining")}
                  for rec in history
                  ],
@@ -188,7 +197,10 @@ def fallback_reply(history, secret_number=None, player_name=None):
     theme = last["theme"]
 
     if theme == "crimson":
-        message = "Ah! That guess is outside your range. Wahala, you just wasted a trial."
+        if last.get("timed_out"):
+            message = "Time up! Wahala, the clock ran out and you lost a trial."
+        else:
+            message = "Ah! That guess is outside your range. Wahala, you just wasted a trial."
     elif theme == "gold":
         message = "E don near! Very close. Check the middle of your range."
     elif theme == "green":
@@ -206,18 +218,23 @@ def _fallback_game_over(history, theme, secret_number, player_name):
     else:
         message = f"Out of trials{name}. The strategy scattered, but you go do better."
 
-    illegal = sum(1 for rec in history if not rec["legal"])
+    timeouts = sum(1 for rec in history if rec.get("timed_out"))
+    illegal = sum(1 for rec in history
+                  if not rec["legal"] and not rec.get("timed_out"))
     scored = [rec["velocity"] for rec in history
               if rec["legal"] and rec["game_status"] == 0]
     summary = f"{len(history)} guesses."
     if illegal:
         summary += f" {illegal} of them were illegal and each one wasted a trial."
+    if timeouts:
+        summary += f" {timeouts} timed out and each one cost a trial."
     if scored:
         average = sum(scored) // len(scored)
         tip = ("Aim for the middle of your remaining range."
                if average < EFFICIENT_VELOCITY
                else "Your search stayed close to ideal halving. Sharp.")
         summary += f" Your other legal guesses removed {average}% of the range on average. {tip}"
+
     if secret_number is not None:
         summary += f" The number was {secret_number}."
     return {"ai_message": message, "game_summary": summary}

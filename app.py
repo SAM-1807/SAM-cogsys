@@ -10,8 +10,10 @@ Messages come from the local rule-based engine; Gemini is an optional sidebar sw
 import ctypes
 import html
 import json
+import math
 import os
 import subprocess
+import time
 
 import streamlit as st
 
@@ -53,6 +55,7 @@ from bridge import GameTelemetry, lib, new_game  # noqa: E402  (after the build)
 import cogsys_logic as cl  # noqa: E402
 
 LEVELS = {"Easy": 1, "Medium": 2, "Hard": 3}
+PRESSURE_LIMITS = {"Easy": 10, "Medium": 7, "Hard": 5}     # seconds per turn
 
 # Session state used by this app. Two kinds, on purpose:
 #   settings (plain keys, always present):  has_started, level, player_name, show_range
@@ -174,12 +177,12 @@ def current_theme():
     return reply["theme"] if reply else "neutral"
 
 
-def show_banner(theme, message):
+def show_banner(theme, message, hint=None):
     """The themed message box. Its label is text, so colour is never the only signal."""
     spec = THEMES[theme]
     st.markdown(
             f"<div class='cog-banner cog-{theme}' role='status' aria-live='polite'>"
-            f"<div class='cog-label'>{spec['label']} <span class='cog-hint'>· {spec['hint']}</span></div>"
+            f"<div class='cog-label'>{spec['label']} <span class='cog-hint'>· {html.escape(hint or spec['hint'])}</span></div>"
             f"<div class='cog-text'>{html.escape(message)}</div></div>",
             unsafe_allow_html=True)
 
@@ -194,7 +197,7 @@ def start_new_game():
     st.session_state.history = []
     st.session_state.rows = []
     st.session_state.reply = None
-
+    st.session_state.deadline = None
 
 def begin_game():
     """Start Game button: copy the rules-screen choices, build a game, open the game page."""
@@ -278,22 +281,44 @@ def result_text(guess, game, record):
     return "Too low" if guess < game.secret_number else "Too high"
 
 
-def play(guess):
+def play(guess, timed_out=False):
     game = st.session_state.game
     before = snap(game)
     lib.process_turn(guess, ctypes.byref(game))
-    record = cl.make_turn_record(before, snap(game))
+    record = cl.make_turn_record(before, snap(game), timed_out=timed_out)
     st.session_state.history.append(record)
     st.session_state.rows.append({"#": len(st.session_state.history),
                                   "Guess": guess,
-                                  "Result": result_text(guess, game, record)})
+                                  "Result": ("Time ran out" if timed_out
+                                             else result_text(guess, game, record))})
     name = (st.session_state.get("player_name") or "").strip() or None
     st.session_state.reply = cl.get_reply(st.session_state.history, game.range_max,
                                           game.secret_number, name, pick_call_model())
+    st.session_state.deadline = None        # next turn starts a fresh clock
+
+
+def time_is_up():
+    deadline = st.session_state.get("deadline")
+    return deadline is not None and time.time() >= deadline
+
+
+@st.fragment(run_every=0.5)
+def show_timer(limit):
+    """Countdown. Redraws itself twice a second and triggers a full rerun at 0."""
+    deadline = st.session_state.get("deadline")
+    if deadline is None:                    # stale tick after a turn ended
+        return
+    left = deadline - time.time()
+    if left <= 0:
+        st.rerun()                          # full rerun: the main script fires the penalty
+    st.progress(max(0.0, min(1.0, left / limit)),
+                text=f"⏱ {math.ceil(left)}s left")
 
 
 def show_reply(reply):
-    show_banner(reply["theme"], reply["ai_message"])
+    last = st.session_state.history[-1] if st.session_state.history else None
+    timed_out = bool(last and last.get("timed_out") and reply["theme"] == "crimson")
+    show_banner(reply["theme"], reply["ai_message"], "Time ran out" if timed_out else None)
     st.caption(f"theme: {reply['theme']} | source: {reply['source']}")
     if reply["game_summary"]:
         st.markdown(reply["game_summary"])
@@ -358,7 +383,8 @@ def show_ghost_bot(game, history, level):
             bot_guess = str(optimal[index]) if index < len(optimal) else "-"
             if index < mine:
                 record = history[index]
-                yours = str(record["guess"]) + ("" if record["legal"] else " (wasted)")
+                yours = ("timed out (wasted)" if record.get("timed_out")
+                         else str(record["guess"]) + ("" if record["legal"] else " (wasted)"))
             else:
                 yours = "-"
             rows.append({"Turn": index + 1, "Optimal bot": bot_guess, "You": yours})
@@ -369,6 +395,8 @@ def show_ghost_bot(game, history, level):
 with st.sidebar:
     st.header("Options")
     st.checkbox("Use Gemini for messages", key="use_gemini")
+    st.checkbox("Enable Pressure Mode", key="pressure_mode",
+                help="Time limit per guess: Easy 10s, Medium 7s, Hard 5s.")
     if st.session_state.has_started:
         st.caption(f"Difficulty: {st.session_state.level}")
         st.button("New game", on_click=back_to_rules)
@@ -396,6 +424,14 @@ if game.game_status == -1:                  # cannot happen from the selector; k
     show_footer()
     st.stop()
 
+if game.game_status == 0 and st.session_state.get("pressure_mode"):
+    limit = PRESSURE_LIMITS[st.session_state.level]
+    if st.session_state.get("deadline") is None:
+        st.session_state.deadline = time.time() + limit
+        show_timer(limit)
+else:
+    st.session_state.deadline = None
+
 if game.game_status == 0:
     with st.form("guess_form", clear_on_submit=True):
         guess = st.number_input(f"Your guess (1 to {game.range_max})", min_value=1,
@@ -408,6 +444,9 @@ if game.game_status == 0:
         else:
             play(int(guess))
             st.rerun()                      # redraw so a finished game hides the form
+    elif time_is_up():
+        play(0, timed_out=True)             # engine treats 0 as illegal: trial lost, crimson
+        st.rerun()
 
 if st.session_state.reply:
     show_reply(st.session_state.reply)
