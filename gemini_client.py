@@ -25,8 +25,8 @@ except ImportError:          # python-dotenv is optional if the variable is alre
 
 # CHECK: pick the order after running compare_models.py on YOUR key.
 DEFAULT_MODELS = ["gemini-3.5-flash-lite"]
-TIMEOUT_SECONDS = 8          # total budget for one reply, across all models
-PER_MODEL_SECONDS = 5        # cap for a single model attempt
+TIMEOUT_SECONDS = 3          # total budget for one reply, across all models
+PER_MODEL_SECONDS = 3        # cap for a single model attempt
 
 _pool = ThreadPoolExecutor(max_workers=4)
 

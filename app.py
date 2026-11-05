@@ -1,11 +1,21 @@
-"""app.py - SAM_CogSys: elite dark-mode card architecture with dynamic theme backgrounds."""
+"""app.py - SAM_CogSys: game loop with a rules gate and full-page themes.
+
+Run locally:   streamlit run app.py
+Flow: rules screen (difficulty, name, Start Game) -> game -> end screen (Play Again).
+The page look follows the Python theme (crimson, green, gold, victory, defeat), and
+every theme also shows a text label, so colour is never the only signal.
+Not in this version (planned): Naija persona, Pressure Mode timer.
+Messages come from the local rule-based engine; Gemini is an optional sidebar switch.
+"""
 import ctypes
+import html
+import json
 import os
 import subprocess
 
 import streamlit as st
 
-st.set_page_config(page_title="SAM_CogSys", page_icon="🧠", layout="centered")
+st.set_page_config(page_title="SAM_CogSys", page_icon="🧠")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIB = os.path.join(HERE, "libgame.so")
@@ -17,12 +27,13 @@ def build_library():
     try:
         build = subprocess.run(["gcc", "-shared", "-fPIC", "-o", LIB, SOURCE],
                                capture_output=True, text=True)
-    except OSError as err:
+    except OSError as err:                    # gcc is not installed on this host
         return f"gcc not available: {err}"
     return None if build.returncode == 0 else build.stderr
 
 
-# Rebuild when the library is missing or older than game.c.
+# Rebuild when the library is missing or older than game.c. If the rebuild fails
+# (no compiler, compile error) but a prebuilt libgame.so exists, keep using it.
 lib_existed = os.path.exists(LIB)
 if not lib_existed or os.path.getmtime(LIB) < os.path.getmtime(SOURCE):
     build_error = build_library()
@@ -35,127 +46,145 @@ if not lib_existed or os.path.getmtime(LIB) < os.path.getmtime(SOURCE):
 try:
     if "GEMINI_API_KEY" in st.secrets:
         os.environ.setdefault("GEMINI_API_KEY", st.secrets["GEMINI_API_KEY"])
-except Exception:
+except Exception:      # no secrets configured (normal when running locally)
     pass
 
-from bridge import GameTelemetry, lib, new_game
-import cogsys_logic as cl
+from bridge import GameTelemetry, lib, new_game  # noqa: E402  (after the build)
+import cogsys_logic as cl  # noqa: E402
 
 LEVELS = {"Easy": 1, "Medium": 2, "Hard": 3}
 
-# Session state used by this app.
+# Session state used by this app. Two kinds, on purpose:
+#   settings (plain keys, always present):  has_started, level, player_name, show_range
+#   widget keys (only exist while their widget is on screen): level_choice,
+#   name_choice, range_choice (rules screen), use_gemini (sidebar)
+# Streamlit deletes a widget's state when the widget is not drawn, so the game
+# page only ever reads the plain settings, which begin_game() copies from the widgets.
 for _key, _default in (("has_started", False), ("level", "Easy"),
-                       ("player_name", ""), ("show_range", False), ("theme", None)):
+                       ("player_name", ""), ("show_range", False)):
     st.session_state.setdefault(_key, _default)
 
-# ---------------------------------------------------------------- ELITE DARK-MODE & DYNAMIC THEME CSS
-def apply_theme_css(theme):
-    """Injects sleek dark-mode card styling while allowing dynamic page backgrounds on events."""
-
-    # Determine background color based on active theme
-    bg_color = "#0b0b0b"
-    sidebar_bg = "#141414"
-    border_color = "#262626"
-    card_bg = "#141414"
-    extra_css = ""
-
-    if theme == "crimson":
-        bg_color = "#B22222"
-        sidebar_bg = "#8B0000"
-        border_color = "#ff6b6b"
-        card_bg = "#801f1f"
-    elif theme == "green":
-        bg_color = "#008751"
-        sidebar_bg = "#004D2C"
-        border_color = "#2ecc71"
-        card_bg = "#00663d"
-    elif theme == "gold":
-        bg_color = "#FFD700"
-        sidebar_bg = "#DAA520"
-        border_color = "#fff275"
-        card_bg = "#cca300"
-    elif theme == "victory":
-        bg_color = "#008751"
-        sidebar_bg = "#004D2C"
-        border_color = "#FFD700"
-        card_bg = "#00663d"
-        extra_css = ".stApp { border: 8px solid #FFD700; box-sizing: border-box; }"
-    elif theme == "defeat":
-        bg_color = "#333333"
-        sidebar_bg = "#1a1a1a"
-        border_color = "#555555"
-        card_bg = "#222222"
-
-    text_color = "black" if theme == "gold" else "white" if theme else "#f0f0f0"
-    sidebar_text = "black" if theme == "gold" else "white" if theme else "#e0e0e0"
-
-    css = f"""
-    <style>
-    /* Global App Background & Dynamic Theme */
-    .stApp {{
-        background-color: {bg_color} !important;
-        color: {text_color} !important;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    }}
-    {extra_css}
-
-    /* Sidebar Styling */
-    [data-testid='stSidebar'] {{
-        background-color: {sidebar_bg} !important;
-        border-right: 1px solid {border_color};
-    }}
-    [data-testid='stSidebar'] p, [data-testid='stSidebar'] span, [data-testid='stSidebar'] label, [data-testid='stSidebar'] h2 {{
-        color: {sidebar_text} !important;
-    }}
-
-    /* Card Containers */
-    div.stMarkdownContainer, div[data-testid="stVerticalBlock"] > div[style*="border"] {{
-        background-color: {card_bg};
-        border: 1px solid {border_color};
-        border-radius: 16px;
-        padding: 1.2rem;
-        box-shadow: 0 8px 30px rgba(0,0,0,0.4);
-        margin-bottom: 1rem;
-    }}
-
-    /* Metric Cards */
-    div[data-testid="stMetric"] {{
-        background-color: {card_bg};
-        border: 1px solid {border_color};
-        padding: 1rem;
-        border-radius: 12px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-    }}
-    div[data-testid="stMetric"] label {{
-        color: {'#333333' if theme == 'gold' else '#aaaaaa'} !important;
-    }}
-    div[data-testid="stMetric"] div[data-testid="stMetricValue"] {{
-        color: {text_color} !important;
-    }}
-
-    /* Buttons */
-    .stButton > button {{
-        border-radius: 10px;
-        font-weight: 600;
-        border: 1px solid {border_color};
-        background-color: {'#fff' if theme == 'gold' else '#1f1f1f'};
-        color: {'#000' if theme == 'gold' else '#ffffff'};
-        transition: all 0.2s ease;
-    }}
-    .stButton > button:hover {{
-        border-color: #555;
-        background-color: {'#e6dfa1' if theme == 'gold' else '#2a2a2a'};
-    }}
-    .stButton > button[kind="primary"] {{
-        background: {'linear-gradient(135deg, #FFD700, #cca300)' if theme == 'victory' else 'linear-gradient(135deg, #2563eb, #1d4ed8)'};
-        border: none;
-        color: {'black' if theme == 'victory' else 'white'};
-    }}
-    </style>
-    """
-    st.markdown(css, unsafe_allow_html=True)
 
 
+# ---------------------------------------------------------------- themes
+# label and hint: the text that always accompanies a theme (colour is never the only signal)
+# page: the full-page background for that theme. Banner colours live in the CSS below.
+THEMES = {
+        "neutral": {"label": "READY", "hint": "Make your first guess",
+                    "page": "linear-gradient(160deg, #14181F, #0B0E13)"},
+        "crimson": {"label": "⚠ WAHALA", "hint": "Outside your range",
+                    "page": ("repeating-linear-gradient(45deg, rgba(255,60,60,0.05) 0 14px, "
+                             "transparent 14px 28px), linear-gradient(160deg, #3B0A0A, #1F0505)")},
+                    "green": {"label": "✔ SHARP GUY", "hint": "Inside your range",
+                              "page": ("repeating-linear-gradient(0deg, rgba(57,217,138,0.18) 0 1px, "
+                                       "transparent 1px 26px), repeating-linear-gradient(90deg, "
+                                       "rgba(57,217,138,0.18) 0 1px, transparent 1px 26px), "
+                                       "linear-gradient(160deg, #052B1C, #03140D)")},
+                              "gold": {"label": "★ E DON NEAR", "hint": "Very close",
+                                       "page": ("radial-gradient(circle at 50% 0%, rgba(255,215,0,0.18), transparent 55%), "
+                                                "linear-gradient(160deg, #3A3000, #1D1800)")},
+                                       "victory": {"label": "🏆 VICTORY", "hint": "You found the number",
+                                                   "page": ("radial-gradient(circle at 50% 0%, rgba(255,215,0,0.25), transparent 60%), "
+                                                            "linear-gradient(160deg, #052B1C, #3A3000)")},
+                                                   "defeat": {"label": "■ DEFEAT", "hint": "Trials finished",
+                                                              "page": "linear-gradient(160deg, #262626, #131313)"},
+                                                   }
+
+MAIN_AREAS = ['[data-testid="stMain"]', "section.main"]     # the page area, not the sidebar
+
+
+def scoped(*inner):
+    """CSS selectors for elements inside the main page area only."""
+    return ",\n".join(f"{area} {selector}" for area in MAIN_AREAS for selector in inner)
+
+
+def build_css(theme):
+    text = scoped('[data-testid="stMarkdownContainer"] *', '[data-testid="stHeading"] *',
+                  '[data-testid="stWidgetLabel"] *', '[data-testid="stMetricLabel"] *',
+                  '[data-testid="stMetricValue"] *', '[data-testid="stExpander"] summary *')
+    restore = scoped('button [data-testid="stMarkdownContainer"] *',
+                     '[data-testid^="stAlert"] [data-testid="stMarkdownContainer"] *')
+    muted = scoped('[data-testid="stCaptionContainer"] *')
+    banner = scoped('[data-testid="stMarkdownContainer"] .cog-banner',
+                    '[data-testid="stMarkdownContainer"] .cog-banner *')
+    footer = scoped('[data-testid="stMarkdownContainer"] .cog-footer')
+    css = """<style>
+.stApp {
+  background: #0B0E13;
+  isolation: isolate;
+}
+.stApp::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: __PAGE__;
+}
+[data-testid="stAppViewContainer"] {
+  background: transparent !important;
+}
+[data-testid="stHeader"], [data-testid="stMain"], section.main {
+  background: transparent !important;
+}
+__TEXT__ { color: #F5F5F5 !important; }
+__RESTORE__ { color: inherit !important; }
+__MUTED__ { color: #BDBDBD !important; }
+.cog-banner {
+  border-radius: 14px; padding: 1rem 1.25rem; margin: 0.25rem 0 1rem 0;
+  border: 3px solid var(--border); background: var(--bg);
+  box-shadow: 0 0 22px var(--glow);
+}
+.cog-label { font-weight: 800; letter-spacing: 0.08em; font-size: 1.05rem; }
+.cog-hint { font-weight: 600; font-size: 0.9rem; letter-spacing: 0; }
+.cog-text { font-size: 1.15rem; margin-top: 0.35rem; }
+.cog-neutral { --bg: #1F2937; --fg: #F5F5F5; --border: #4B5563; --glow: rgba(0,0,0,0); }
+.cog-crimson { --bg: #B22222; --fg: #FFFFFF; --border: #FF8A8A; --glow: rgba(255,70,70,0.55);
+  animation: cog-shake 0.45s ease-in-out 1, cog-pulse 1.8s ease-in-out infinite; }
+.cog-green { --bg: #008751; --fg: #FFFFFF; --border: #39D98A; --glow: rgba(57,217,138,0.45); }
+.cog-gold { --bg: #FFD700; --fg: #1A1A1A; --border: #FFF3A0; --glow: rgba(255,215,0,0.6);
+  animation: cog-glow 2s ease-in-out infinite; }
+.cog-victory { --bg: #008751; --fg: #FFFFFF; --border: #FFD700; --glow: rgba(255,215,0,0.65);
+  border-width: 4px; }
+.cog-defeat { --bg: #333333; --fg: #F2F2F2; --border: #8A8A8A; --glow: rgba(0,0,0,0); }
+__BANNER__ { color: var(--fg) !important; }
+__FOOTER__ { color: #BDBDBD !important; text-align: center; font-size: 0.8rem;
+  padding-top: 2rem; }
+@keyframes cog-shake { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-8px); }
+  40% { transform: translateX(8px); } 60% { transform: translateX(-5px); }
+  80% { transform: translateX(5px); } }
+@keyframes cog-pulse { 0%, 100% { box-shadow: 0 0 12px rgba(255,70,70,0.35); }
+  50% { box-shadow: 0 0 30px 6px rgba(255,70,70,0.75); } }
+@keyframes cog-glow { 0%, 100% { box-shadow: 0 0 14px rgba(255,215,0,0.35); }
+  50% { box-shadow: 0 0 34px 8px rgba(255,215,0,0.75); } }
+@media (prefers-reduced-motion: reduce) { .cog-banner { animation: none !important; } }
+</style>"""
+    for marker, value in (("__PAGE__", THEMES[theme]["page"]), ("__TEXT__", text),
+                          ("__RESTORE__", restore), ("__MUTED__", muted),
+                          ("__BANNER__", banner), ("__FOOTER__", footer)):
+        css = css.replace(marker, value)
+    return css
+
+
+def current_theme():
+    """Theme for the whole page: neutral on the rules screen and before the first guess."""
+    if not st.session_state.has_started:
+        return "neutral"
+    reply = st.session_state.get("reply")
+    return reply["theme"] if reply else "neutral"
+
+
+def show_banner(theme, message):
+    """The themed message box. Its label is text, so colour is never the only signal."""
+    spec = THEMES[theme]
+    st.markdown(
+            f"<div class='cog-banner cog-{theme}' role='status' aria-live='polite'>"
+            f"<div class='cog-label'>{spec['label']} <span class='cog-hint'>· {spec['hint']}</span></div>"
+            f"<div class='cog-text'>{html.escape(message)}</div></div>",
+            unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------- helpers
 def snap(game):
     return {name: getattr(game, name) for name, _ in GameTelemetry._fields_}
 
@@ -165,10 +194,10 @@ def start_new_game():
     st.session_state.history = []
     st.session_state.rows = []
     st.session_state.reply = None
-    st.session_state.theme = None
 
 
 def begin_game():
+    """Start Game button: copy the rules-screen choices, build a game, open the game page."""
     state = st.session_state
     state.level = state.get("level_choice", state.level)
     state.player_name = (state.get("name_choice", state.player_name) or "").strip()
@@ -178,12 +207,13 @@ def begin_game():
 
 
 def back_to_rules():
+    """New game / Play Again: return to the rules screen (the previous choices are kept)."""
     st.session_state.has_started = False
-    st.session_state.theme = None
 
 
 @st.cache_data
 def level_info():
+    """Range and trials per level, read from the engine so the rules never drift from it."""
     info = {}
     for name, level in LEVELS.items():
         probe = new_game(level)
@@ -192,16 +222,13 @@ def level_info():
 
 
 def show_footer():
-    st.markdown(
-            "<div style='text-align: center; color: inherit; font-size: 1.1rem; font-weight: 700; "
-            "padding-top: 3rem; letter-spacing: 1px; text-shadow: 0px 1px 2px rgba(0,0,0,0.3);'>Developed by SAM</div>",
-            unsafe_allow_html=True)
+    st.markdown("<div class='cog-footer'>Developed by SAM</div>", unsafe_allow_html=True)
 
 
 def show_rules():
     st.title("SAM_CogSys")
-    st.caption("High-performance psychometric telemetry engine.")
-    with st.container():
+    st.caption("Guess the number. The engine measures how efficiently you search.")
+    with st.container(border=True):
         st.subheader("How to play")
         st.markdown(
                 "1. The game picks a secret number. Find it before your trials run out.\n"
@@ -209,8 +236,9 @@ def show_rules():
                 "or \"Too high\".\n"
                 "3. **Penalty:** a guess outside the range you have already narrowed "
                 "down is wasted. It costs a trial and teaches you nothing.\n"
-                "4. After each guess, an AI mentor reacts to how well you searched.\n"
-                "5. At the end, your path is compared with a perfect optimal search.")
+                "4. After each guess, a message reacts to how well you searched.\n"
+                "5. At the end, your path is compared with a perfect halving search "
+                "for the same number.")
         st.markdown("\n".join(
             f"- **{name}:** numbers 1 to {top}, {trials} trials"
             for name, (top, trials) in level_info().items()))
@@ -220,7 +248,7 @@ def show_rules():
                       key="name_choice")
         st.checkbox("Show my possible range (easier)", value=st.session_state.show_range,
                     key="range_choice")
-        st.button("Start Game", type="primary", on_click=begin_game, use_container_width=True)
+        st.button("Start Game", type="primary", on_click=begin_game)
 
 
 @st.cache_resource
@@ -230,15 +258,15 @@ def load_gemini():
 
 
 def gemini_off(system_prompt, payload_json):
-    raise RuntimeError("Gemini is switched off")
+    raise RuntimeError("Gemini is switched off")     # get_reply turns this into the fallback
 
 
 def pick_call_model():
     if st.session_state.get("use_gemini"):
         try:
             return load_gemini()
-        except Exception:
-            st.sidebar.warning("Gemini unavailable. Using local messages.")
+        except Exception as err:                      # SDK or key missing
+            st.sidebar.warning(f"Gemini unavailable ({type(err).__name__}). Using local messages.")
     return gemini_off
 
 
@@ -262,28 +290,20 @@ def play(guess):
     name = (st.session_state.get("player_name") or "").strip() or None
     st.session_state.reply = cl.get_reply(st.session_state.history, game.range_max,
                                           game.secret_number, name, pick_call_model())
-    if st.session_state.reply:
-        st.session_state.theme = st.session_state.reply.get("theme")
 
 
 def show_reply(reply):
-    """Displays the AI message inside a polished feedback card."""
-    labels = {
-            "crimson": "⚠️ WAHALA (Logical Error)",
-            "gold": "🔥 E DON NEAR (Very Close)",
-            "green": "✅ SHARP (Efficient)",
-            "victory": "🏆 VICTORY",
-            "defeat": "💀 DEFEAT"
-            }
-    with st.container():
-        st.subheader(labels.get(reply["theme"], ""))
-        st.write(f"**{reply['ai_message']}**")
-        st.caption(f"theme: {reply['theme']} | source: {reply['source']}")
-        if reply["game_summary"]:
-            st.write(reply["game_summary"])
+    show_banner(reply["theme"], reply["ai_message"])
+    st.caption(f"theme: {reply['theme']} | source: {reply['source']}")
+    if reply["game_summary"]:
+        st.markdown(reply["game_summary"])
 
 
 def optimal_path(level, secret):
+    """Guesses a perfect midpoint search would make for this secret.
+
+    Uses the real engine with a throwaway game, so the bot plays by the same rules.
+    """
     bot = new_game(level)
     bot.secret_number = secret
     guesses = []
@@ -299,61 +319,62 @@ def plural(count, word="turn"):
 
 
 def show_ghost_bot(game, history, level):
+    """Compare the player's path with a perfect midpoint search for the same secret."""
     optimal = optimal_path(level, game.secret_number)
     if optimal is None:
         return
     mine = len(history)
     wasted = sum(1 for record in history if not record["legal"])
 
-    with st.container():
-        st.subheader("Optimal path vs your path")
-        left, right = st.columns(2)
-        left.metric("Optimal Path", plural(len(optimal)))
-        right.metric("Your Path", plural(mine))
-        st.caption("Optimal = a perfect halving search algorithm.")
+    st.subheader("Optimal path vs your path")
+    left, right = st.columns(2)
+    left.metric("Optimal Path", plural(len(optimal)))
+    right.metric("Your Path", plural(mine))
+    st.caption("Optimal = a perfect halving search that does not know the number in advance.")
 
-        if game.game_status == 1:
-            gap = mine - len(optimal)
-            if gap < 0:
-                st.success("You found it faster than a perfect search would. Excellent.")
-            elif gap == 0:
-                st.success("You matched the optimal path.")
-            else:
-                st.info(f"You were {plural(gap)} over the optimal path.")
+    if game.game_status == 1:
+        gap = mine - len(optimal)
+        if gap < 0:
+            st.success("You found it faster than a perfect search would. Excellent.")
+        elif gap == 0:
+            st.success("You matched the optimal path.")
         else:
-            numbers_left = game.current_max - game.current_min + 1
-            message = (f"You ran out of trials after {plural(mine)}. A perfect search finds "
-                       f"this number in {plural(len(optimal))}. When your trials ended, "
-                       f"{numbers_left} numbers were still possible.")
-            if mine > len(optimal):
-                message += f" That is {plural(mine - len(optimal))} more than the optimal path."
-            st.info(message)
+            st.info(f"You were {plural(gap)} over the optimal path.")
+    else:
+        numbers_left = game.current_max - game.current_min + 1
+        message = (f"You ran out of trials after {plural(mine)}. A perfect search finds "
+                   f"this number in {plural(len(optimal))}. When your trials ended, "
+                   f"{numbers_left} numbers were still possible.")
+        if mine > len(optimal):
+            message += f" That is {plural(mine - len(optimal))} more than the optimal path."
+        st.info(message)
 
-        st.caption(f"Efficient turns: {mine - wasted} | Wasted turns: {wasted}")
+    st.caption(f"Efficient turns (inside your range): {mine - wasted} | "
+               f"Wasted turns (outside your range): {wasted}")
 
-        with st.expander("See the optimal path breakdown"):
-            rows = []
-            for index in range(max(len(optimal), mine)):
-                bot_guess = str(optimal[index]) if index < len(optimal) else "-"
-                if index < mine:
-                    record = history[index]
-                    yours = str(record["guess"]) + ("" if record["legal"] else " (wasted)")
-                else:
-                    yours = "-"
-                rows.append({"Turn": index + 1, "Optimal bot": bot_guess, "You": yours})
-            st.dataframe(rows, hide_index=True, use_container_width=True)
+    with st.expander("See the optimal path"):
+        rows = []
+        for index in range(max(len(optimal), mine)):
+            bot_guess = str(optimal[index]) if index < len(optimal) else "-"
+            if index < mine:
+                record = history[index]
+                yours = str(record["guess"]) + ("" if record["legal"] else " (wasted)")
+            else:
+                yours = "-"
+            rows.append({"Turn": index + 1, "Optimal bot": bot_guess, "You": yours})
+        st.dataframe(rows, hide_index=True)
 
-
-# ---------------------------------------------------------------- APPLY THEME
-apply_theme_css(st.session_state.get("theme"))
 
 # ---------------------------------------------------------------- sidebar
 with st.sidebar:
-    st.header("Session Options")
+    st.header("Options")
     st.checkbox("Use Gemini for messages", key="use_gemini")
     if st.session_state.has_started:
         st.caption(f"Difficulty: {st.session_state.level}")
-        st.button("New game", on_click=back_to_rules, use_container_width=True)
+        st.button("New game", on_click=back_to_rules)
+
+# ---------------------------------------------------------------- page theme
+st.markdown(build_css(current_theme()), unsafe_allow_html=True)
 
 # ---------------------------------------------------------------- rules gate
 if not st.session_state.has_started:
@@ -361,57 +382,58 @@ if not st.session_state.has_started:
     show_footer()
     st.stop()
 
-if "game" not in st.session_state:
+if "game" not in st.session_state:          # safety net: started, but no game object yet
     start_new_game()
 game = st.session_state.game
 history = st.session_state.history
 
 # ---------------------------------------------------------------- game page
 st.title("SAM_CogSys")
-st.caption("Guess the number. Analyzing search telemetry in real-time.")
+st.caption("Guess the number. The engine measures how you search.")
 
-if game.game_status == -1:
+if game.game_status == -1:                  # cannot happen from the selector; kept as a guard
     st.error("The engine reported an invalid difficulty.")
     show_footer()
     st.stop()
 
 if game.game_status == 0:
-    with st.container():
-        with st.form("guess_form", clear_on_submit=True):
-            guess = st.number_input(f"Your guess (1 to {game.range_max})", min_value=1,
-                                    max_value=game.range_max, value=None, step=1,
-                                    placeholder="Type a number")
-            submitted = st.form_submit_button("Submit Guess", use_container_width=True)
-        if submitted:
-            if guess is None:
-                st.warning("Type a number first.")
-            else:
-                play(int(guess))
-                st.rerun()
+    with st.form("guess_form", clear_on_submit=True):
+        guess = st.number_input(f"Your guess (1 to {game.range_max})", min_value=1,
+                                max_value=game.range_max, value=None, step=1,
+                                placeholder="Type a number")
+        submitted = st.form_submit_button("Guess")
+    if submitted:
+        if guess is None:
+            st.warning("Type a number first.")
+        else:
+            play(int(guess))
+            st.rerun()                      # redraw so a finished game hides the form
 
-if st.session_state.get("reply"):
+if st.session_state.reply:
     show_reply(st.session_state.reply)
+elif game.game_status == 0:
+    show_banner("neutral", "Type a number and press Guess.")
 
 if game.game_status in (1, 2):
-    st.markdown(f"### The number was **{game.secret_number}**.")
+    st.write(f"The number was **{game.secret_number}**.")
     show_ghost_bot(game, history, LEVELS[st.session_state.level])
-    st.button("Play Again", type="primary", on_click=start_new_game, use_container_width=True)
+    st.button("Play Again", type="primary", on_click=back_to_rules)
 
-col1, col2, col3 = st.columns(3)
-col1.metric("Trials left", game.trials_remaining)
-col2.metric("Guesses made", len(history))
+left, middle, right = st.columns(3)
+left.metric("Trials left", game.trials_remaining)
+middle.metric("Guesses made", len(history))
 if st.session_state.show_range and game.game_status == 0:
-    col3.metric("Possible range", f"{game.current_min} to {game.current_max}")
+    right.metric("Possible range", f"{game.current_min} to {game.current_max}")
 
 if st.session_state.rows:
-    with st.container():
-        st.subheader("Your guesses")
-        st.dataframe(st.session_state.rows, hide_index=True, use_container_width=True)
+    st.subheader("Your guesses")
+    st.dataframe(st.session_state.rows, hide_index=True)
 
-with st.expander("Engine telemetry stream"):
+with st.expander("Engine telemetry"):
     data = snap(game)
     if game.game_status == 0:
-        data.pop("secret_number")
-    st.json({"engine_struct": data, "last_turn": history[-1] if history else None})
+        data.pop("secret_number")           # never show the secret while playing
+    st.code(json.dumps({"engine_struct": data, "last_turn": history[-1] if history else None},
+                       indent=2), language="json")
 
 show_footer()
