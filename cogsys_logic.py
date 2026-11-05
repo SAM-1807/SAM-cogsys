@@ -98,13 +98,26 @@ Output rules:
 1. Reply with one JSON object and nothing else: no markdown, no code fences.
 2. Keys, exactly: "ai_message" and "game_summary".
 3. ai_message: 1 or 2 short sentences, at most 160 characters, about the LAST
-   guess. While phase is "playing": clinical and neutral, no name, no
-   exclamation marks. You may give a strategy hint such as "try the middle of
-   your remaining range".
+   guess. Voice: a witty, sharp Nigerian tech mentor. Use light slang
+   naturally (wahala, sharp, sabi, e don near), at most two slang words per
+   message. Never use the name while playing. Pick the tone from
+   theme_chosen_by_engine and the LAST history entry. These describe the vibe;
+   never copy their wording:
+   - crimson: strict. The guess was outside the range and wasted a trial.
+   - gold: encouraging. Very close. Tell the player to check the middle of
+     their range. Do not state or hint at the number.
+   - green and last velocity is 40 or more: sharp approval. The guess cut the
+     range about in half or more.
+   - green and last velocity is below 40: neutral nudge. That guess removed
+     little range. Suggest the middle next. No praise.
+   - victory or defeat: see rule 4.
 4. game_summary: null while phase is "playing". When phase is "won" or "lost":
-   2 to 3 sentences, at most 420 characters, describing the WHOLE sequence: how
-   consistently the player halved the range, how many guesses were illegal, and
-   one concrete tip. You may state the secret number then.
+   2 to 3 sentences, at most 420 characters, in the same mentor voice,
+   describing the WHOLE sequence: how consistently the player halved the range
+   and one concrete tip. Mention illegal guesses ONLY if at least one history
+   entry has legal false. If phase is "won": celebratory. If phase is "lost":
+   constructive, not harsh. You may state the secret number then. In this case
+   ai_message is a short celebratory (won) or constructive (lost) line.
 5. Address the player as "you". Use player_name at most once, but only when phase is "won" or "lost". If player_name is null, do not use a name at all.
 6. While playing, never state or hint at the secret number, and never use the
    name "SAM".
@@ -175,42 +188,39 @@ def fallback_reply(history, secret_number=None, player_name=None):
     theme = last["theme"]
 
     if theme == "crimson":
-        message = "That guess was outside your remaining range and cost a trial."
+        message = "Ah! That guess is outside your range. Wahala, you just wasted a trial."
     elif theme == "gold":
-        message = "Very close to the target. Keep your next guess inside your range."
+        message = "E don near! Very close. Check the middle of your range."
     elif theme == "green":
         if last["velocity"] >= EFFICIENT_VELOCITY:
-            message = ("Efficient guess: it removed about half of your "
-                       "remaining range or more.")
+            message = "Sharp move. You cut your range by about half or more."
         else:
-            message = "That guess removed little of your range. Try the middle next."
+            message = "That one removed little range. Try the middle next."
     else:
         return _fallback_game_over(history, theme, secret_number, player_name)
     return {"ai_message": message, "game_summary": None}
-
-
 def _fallback_game_over(history, theme, secret_number, player_name):
     name = f", {player_name}" if player_name else ""
     if theme == "victory":
-        message = f"Solved in {len(history)} guesses{name}."
+        message = f"Correct{name}! You sabi this thing. Solved in {len(history)} guesses."
     else:
-        message = f"Out of trials{name}."
+        message = f"Out of trials{name}. The strategy scattered, but you go do better."
 
     illegal = sum(1 for rec in history if not rec["legal"])
     scored = [rec["velocity"] for rec in history
               if rec["legal"] and rec["game_status"] == 0]
-    summary = f"{len(history)} guesses, {illegal} illegal."
+    summary = f"{len(history)} guesses."
+    if illegal:
+        summary += f" {illegal} of them were illegal and each one wasted a trial."
     if scored:
         average = sum(scored) // len(scored)
         tip = ("Aim for the middle of your remaining range."
                if average < EFFICIENT_VELOCITY
-               else "Your search stayed close to ideal halving.")
+               else "Your search stayed close to ideal halving. Sharp.")
         summary += f" Your other legal guesses removed {average}% of the range on average. {tip}"
     if secret_number is not None:
         summary += f" The number was {secret_number}."
     return {"ai_message": message, "game_summary": summary}
-
-
 def get_reply(history, range_max, secret_number, player_name, call_model):
     """Ask Gemini through call_model(system_prompt, payload_json) -> str.
 
