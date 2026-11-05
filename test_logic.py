@@ -44,10 +44,9 @@ def play_game(difficulty, secret, strategy, max_turns=30):
 
 def rec(theme, velocity=50, legal=True, status=0):
     """A hand-made history entry for fallback and payload tests."""
-    return {"guess": 10, "legal": legal, "window_before": 50, "velocity": velocity,
+    return {"guess": 10, "legal": legal, "timed_out": False, "window_before": 50, "velocity": velocity,
             "proximity": 95 if theme == "gold" else 40, "trials_remaining": 3,
             "game_status": status, "theme": theme}
-
 
 # ------------------------------------------------------------ A: proximity
 check("A proximity exact guess is 100", cl.compute_proximity(0, 100) == 100)
@@ -110,7 +109,7 @@ payload = cl.build_payload([rec("green"), rec("victory", 100, True, 1)], 100, 42
 check("E payload after game over includes secret and name",
       payload["secret_number"] == 42 and payload["player_name"] == "SAM", payload)
 check("E history entries expose exactly the documented fields",
-      set(payload["history"][0]) == {"guess", "legal", "window_before", "velocity",
+      set(payload["history"][0]) == {"guess", "legal", "timed_out", "window_before", "velocity",
                                      "proximity", "trials_remaining"}, payload["history"][0])
 
 # ------------------------------------------------------------ F: validator
