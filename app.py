@@ -22,6 +22,9 @@ st.set_page_config(page_title="SAM_CogSys", page_icon="🧠")
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIB = os.path.join(HERE, "libgame.so")
 SOURCE = os.path.join(HERE, "game.c")
+SOUND_DIR = os.path.join(HERE, "sounds")
+SOUND_FILES = {"music": "play.mp3", "victory": "victory.mp3", "defeat": "start.mp3"}
+
 
 
 def build_library():
@@ -55,7 +58,7 @@ from bridge import GameTelemetry, lib, new_game  # noqa: E402  (after the build)
 import cogsys_logic as cl  # noqa: E402
 
 LEVELS = {"Easy": 1, "Medium": 2, "Hard": 3}
-PRESSURE_LIMITS = {"Easy": 10, "Medium": 7, "Hard": 5}     # seconds per turn
+PRESSURE_LIMITS = {"Easy": 20, "Medium": 15, "Hard": 10}     # seconds per turn
 
 # Session state used by this app. Two kinds, on purpose:
 #   settings (plain keys, always present):  has_started, level, player_name, show_range
@@ -161,6 +164,12 @@ __FOOTER__ { color: #BDBDBD !important; text-align: center; font-size: 0.8rem;
 @keyframes cog-glow { 0%, 100% { box-shadow: 0 0 14px rgba(255,215,0,0.35); }
   50% { box-shadow: 0 0 34px 8px rgba(255,215,0,0.75); } }
 @media (prefers-reduced-motion: reduce) { .cog-banner { animation: none !important; } }
+[data-testid="stForm"] button {
+  background: #4B5563 !important; color: #FFFFFF !important; border: 1px solid #6B7280 !important;
+}
+[data-testid="stForm"]:has(input:not(:placeholder-shown):valid) button {
+  background: #1E6FE8 !important; border-color: #6FA8FF !important;
+}
 </style>"""
     for marker, value in (("__PAGE__", THEMES[theme]["page"]), ("__TEXT__", text),
                           ("__RESTORE__", restore), ("__MUTED__", muted),
@@ -295,6 +304,10 @@ def play(guess, timed_out=False):
     st.session_state.reply = cl.get_reply(st.session_state.history, game.range_max,
                                           game.secret_number, name, pick_call_model())
     st.session_state.deadline = None        # next turn starts a fresh clock
+    if game.game_status == 1:
+        st.session_state.pending_sound = "victory"
+    elif game.game_status == 2:
+        st.session_state.pending_sound = "defeat"
 
 
 def time_is_up():
@@ -310,7 +323,8 @@ def show_timer(limit):
         return
     left = deadline - time.time()
     if left <= 0:
-        st.rerun()                          # full rerun: the main script fires the penalty
+        st.progress(0.0, text="⏱ Time's up")
+        st.rerun()                          # full rerun: the main script queues the penalty
     st.progress(max(0.0, min(1.0, left / limit)),
                 text=f"⏱ {math.ceil(left)}s left")
 
@@ -319,7 +333,6 @@ def show_reply(reply):
     last = st.session_state.history[-1] if st.session_state.history else None
     timed_out = bool(last and last.get("timed_out") and reply["theme"] == "crimson")
     show_banner(reply["theme"], reply["ai_message"], "Time ran out" if timed_out else None)
-    st.caption(f"theme: {reply['theme']} | source: {reply['source']}")
     if reply["game_summary"]:
         st.markdown(reply["game_summary"])
 
@@ -396,7 +409,7 @@ with st.sidebar:
     st.header("Options")
     st.checkbox("Use Gemini for messages", key="use_gemini")
     st.checkbox("Enable Pressure Mode", key="pressure_mode",
-                help="Time limit per guess: Easy 10s, Medium 7s, Hard 5s.")
+                help="Time limit per guess: Easy 20s, Medium 15s, Hard 10s.")
     if st.session_state.has_started:
         st.caption(f"Difficulty: {st.session_state.level}")
         st.button("New game", on_click=back_to_rules)
@@ -426,11 +439,49 @@ if game.game_status == -1:                  # cannot happen from the selector; k
 
 if game.game_status == 0 and st.session_state.get("pressure_mode"):
     limit = PRESSURE_LIMITS[st.session_state.level]
+
+
+@st.cache_data
+def load_sound(name):
+    """Bytes of a local .mp3, or None if the file is missing (the game stays silent)."""
+    try:
+        with open(os.path.join(SOUND_DIR, SOUND_FILES[name]), "rb") as handle:
+            return handle.read()
+    except OSError:
+        return None
+
+
+
+
+def play_pending_sound(playing):
+    """One audio slot: a queued sound (victory/defeat) wins, else music while playing."""
+    name = st.session_state.pop("pending_sound", None)
+    if name is None and playing:
+        name = "music"
+    data = load_sound(name) if name else None
+    if data:
+        st.audio(data, format="audio/mpeg", autoplay=True, loop=(name == "music"))
+
+
+# --- GAME PAGE START ---
+play_pending_sound(game.game_status == 0)
+
+pending = st.session_state.pop("pending_guess", None)
+if pending is not None and game.game_status == 0:
+    st.session_state.deadline = None
+    with st.spinner("Checking your guess..."):
+        play(pending["guess"], timed_out=pending["timed_out"])
+    st.rerun()                              # redraw so a finished game hides the form
+
+timer_slot = st.container()                 # the timer is drawn here, after the form code
+limit = None
+if game.game_status == 0 and st.session_state.get("pressure_mode"):
+    limit = PRESSURE_LIMITS[st.session_state.level]
     if st.session_state.get("deadline") is None:
         st.session_state.deadline = time.time() + limit
-        show_timer(limit)
 else:
     st.session_state.deadline = None
+
 
 if game.game_status == 0:
     with st.form("guess_form", clear_on_submit=True):
@@ -442,15 +493,23 @@ if game.game_status == 0:
         if guess is None:
             st.warning("Type a number first.")
         else:
-            play(int(guess))
-            st.rerun()                      # redraw so a finished game hides the form
+            st.session_state.deadline = None
+            st.session_state.pending_guess = {"guess": int(guess), "timed_out": False}
+            st.rerun()                      # the next run plays it, with no timer on screen
     elif time_is_up():
-        play(0, timed_out=True)             # engine treats 0 as illegal: trial lost, crimson
+        st.session_state.deadline = None
+        st.session_state.pending_guess = {"guess": 0, "timed_out": True}   # engine treats 0 as illegal
         st.rerun()
+
+
+if limit is not None:
+    with timer_slot:
+        show_timer(limit)
 
 if st.session_state.reply:
     show_reply(st.session_state.reply)
 elif game.game_status == 0:
+
     show_banner("neutral", "Type a number and press Guess.")
 
 if game.game_status in (1, 2):
@@ -469,6 +528,9 @@ if st.session_state.rows:
     st.dataframe(st.session_state.rows, hide_index=True)
 
 with st.expander("Engine telemetry"):
+    reply = st.session_state.reply or {}
+    if reply:
+        st.caption(f"theme: {reply['theme']} | source: {reply['source']}")
     data = snap(game)
     if game.game_status == 0:
         data.pop("secret_number")           # never show the secret while playing
