@@ -67,7 +67,8 @@ PRESSURE_LIMITS = {"Easy": 20, "Medium": 15, "Hard": 10}     # seconds per turn
 # Streamlit deletes a widget's state when the widget is not drawn, so the game
 # page only ever reads the plain settings, which begin_game() copies from the widgets.
 for _key, _default in (("has_started", False), ("level", "Easy"),
-                       ("player_name", ""), ("show_range", False)):
+                       ("player_name", ""), ("show_range", False),
+                       ("pressure_mode", False)):
     st.session_state.setdefault(_key, _default)
 
 
@@ -214,6 +215,7 @@ def begin_game():
     state.level = state.get("level_choice", state.level)
     state.player_name = (state.get("name_choice", state.player_name) or "").strip()
     state.show_range = bool(state.get("range_choice", state.show_range))
+    state.pressure_mode = bool(state.get("pressure_choice", state.pressure_mode))
     start_new_game()
     state.has_started = True
 
@@ -250,7 +252,9 @@ def show_rules():
                 "down is wasted. It costs a trial and teaches you nothing.\n"
                 "4. After each guess, a message reacts to how well you searched.\n"
                 "5. At the end, your path is compared with a perfect halving search "
-                "for the same number.")
+                "for the same number.\n"
+                "6. **Pressure Mode (optional):** adds a ticking clock to every guess. "
+                "If time runs out, you lose a trial.")
         st.markdown("\n".join(
             f"- **{name}:** numbers 1 to {top}, {trials} trials"
             for name, (top, trials) in level_info().items()))
@@ -260,6 +264,9 @@ def show_rules():
                       key="name_choice")
         st.checkbox("Show my possible range (easier)", value=st.session_state.show_range,
                     key="range_choice")
+        st.checkbox("Enable Pressure Mode", value=st.session_state.pressure_mode,
+                    key="pressure_choice",
+                    help="Time limit per guess: Easy 20s, Medium 15s, Hard 10s.")
         st.button("Start Game", type="primary", on_click=begin_game)
 
 
@@ -408,8 +415,6 @@ def show_ghost_bot(game, history, level):
 with st.sidebar:
     st.header("Options")
     st.checkbox("Use Gemini for messages", key="use_gemini")
-    st.checkbox("Enable Pressure Mode", key="pressure_mode",
-                help="Time limit per guess: Easy 20s, Medium 15s, Hard 10s.")
     if st.session_state.has_started:
         st.caption(f"Difficulty: {st.session_state.level}")
         st.button("New game", on_click=back_to_rules)
@@ -461,7 +466,8 @@ def play_pending_sound(playing):
     data = load_sound(name) if name else None
     if data:
         st.audio(data, format="audio/mpeg", autoplay=True, loop=(name == "music"))
-
+        if name == "music":
+            st.caption("On a phone? Tap play on the player above to start the music.")
 
 # --- GAME PAGE START ---
 play_pending_sound(game.game_status == 0)
