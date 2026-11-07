@@ -1,113 +1,106 @@
 # SAM_CogSys
 
-An AI-powered behavioral diagnostic game engine that measures *how* a player thinks, not just whether they win.
+**The problem:** Most assessments only measure whether you got the right answer, not *how* you got there. Two candidates can score the same while one guesses randomly and the other uses systematic logic. SAM_CogSys is a web-based game that makes the search process visible.
 
 ## 🏆 Hackathon Submission: BUILDUP UNIZIK 2026
 
-This project was built for the BUILDUP UNIZIK hackathon (November 2–7, 2026). It is a web-based behavioral diagnostic tool disguised as a number-guessing game. It combines a high-performance C engine for calculating search telemetry with the Gemini API for generating real-time feedback based on the player's cognitive strategy.
+This project was built for the BUILDUP UNIZIK hackathon (Nov 2–7, 2026). It is a number-guessing game that uses a high-performance C engine to calculate search telemetry, and the Gemini API to generate real-time feedback on the player's search strategy.
 
 **Live Demo:** [https://sam-cogsys.streamlit.app/](https://sam-cogsys.streamlit.app/)
 
-### 💡 Why This Matters
+### 💡 Who Is This For?
 
-Most assessments focus on whether someone gets the right answer, not how they arrived at it. SAM_CogSys explores a different approach: using gameplay to observe decision-making patterns, search strategies, and responses under pressure. The goal is to make the thinking process measurable, not just the final outcome.
+- **Primary:** Computer Science students learning algorithmic thinking (like binary search).
+- **Secondary:** Educators and technical recruiters who want to assess problem-solving *process*, not just final answers.
 
-## 🛠️ How It Works: The 4-Layer Architecture
+### 🛠️ How It Works: The 4-Layer Architecture
 
-1. **The Core (C Engine):** A stateless shared library (`libgame.so`) that handles the calculations. It computes 10 behavioral telemetry metrics, including search velocity, distance, and logical entropy, in microseconds.
-2. **The Bridge (Python):** Uses `ctypes` to map the C struct to Python.
-3. **The Logic (Python):** The brain of the app. It calculates window-relative proximity, determines the UI theme deterministically, validates the AI's JSON, and runs a local fallback engine if the API fails.
-4. **The Voice (Gemini API):** Gemini receives the telemetry and generates live commentary and end-game cognitive strategy profiles in a witty Nigerian persona (the "Naija Persona").
+1. **The Core (C Engine):** A stateless shared library (`libgame.so`) that handles the math. It computes a 10-field telemetry struct (search velocity, distance, logical entropy, bounds).
+                            2. **The Bridge (Python):** Uses `ctypes` to map the C struct to Python.
+                                                        3. **The Logic (Python):** Calculates window-relative proximity, decides the UI theme deterministically, validates the AI's JSON, and runs a local fallback engine if the API fails.
+                                                                                   4. **The Voice (Gemini API):** Gemini receives the telemetry and writes live commentary and end-game search-strategy summaries in a witty Nigerian persona ("Naija Persona").
 
-### Understanding Logical Entropy
+### ⚙️ Technical Definitions
 
-The `logical_entropy` metric tracks whether a player's guess falls outside the currently valid search boundaries. It provides an indication of how well the player maintains logical consistency during the search.
+                                                                                                                  - **`logical_entropy`:** A flag that triggers when a player guesses outside the current valid bounds (ignoring information they already learned).
+                                                                                                                  - **`space_velocity`:** The percentage of the search space eliminated by a single guess.
+                                                                                                                  - **Timeouts (Pressure Mode):** If the timer runs out, the game auto-submits a guess of `0` (costing a trial). The system explicitly reports this to the AI as a "time-out," not an "illegal guess."
 
-This is an operational behavioral metric, not a claim of calculating Shannon entropy or measuring a validated psychological construct.
+### 🔌 Google Product Integration (Gemini)
 
-## ✨ Key Features
+                                                                                                                                                  - **The Model:** We use `gemini-3.5-flash-lite`.
+                                                                                                                                                  - **The Split:** Python calculates the exact math and picks the UI theme. Gemini is only allowed to generate the text (`ai_message`) and the end-game summary (`game_summary`).
+                                                                                                                                                  - **Security:** The API key is stored in a `.env` file locally and in Streamlit Cloud "Secrets" in production. It is never committed to the repo.
+                                                                                                                                                  - **No Key? No Problem:** The game works without a Gemini API key. If the key is missing or the API times out (3-second limit), the Python layer instantly falls back to a local rule-based engine so the game never crashes.
 
-- **Cognitive Strategy Telemetry:** Observes whether a player searches systematically or resorts to random guessing. It uses behavioral indicators such as search velocity, guess distance, and logical consistency.
-- **Ghost Bot Comparison:** At the end of the game, the app simulates an optimal binary search for the specific secret number and compares the player's path to the mathematical ideal.
-- **Dynamic UI Themes:** The entire screen changes color based on the theme: crimson for errors, Matrix green for efficiency, and gold for proximity.
-- **Pressure Mode:** A toggleable ticking clock with time limits of 20 seconds (Easy), 15 seconds (Medium), and 10 seconds (Hard). It introduces time pressure and penalizes slow decision-making.
-- **Fault-Tolerant AI:** If the Gemini API times out (after a 3-second limit) or returns invalid output, the Python layer immediately falls back to a local rule-based engine so the game does not crash.
-
----
+                                                                                                                                                  ---
 
 ## 📅 Pre-Hackathon vs. Hackathon Work
 
-To comply with the hackathon rules, this section clearly distinguishes what was built before the event from what was built during it. The Git tag `hackathon-start` marks the exact boundary.
+                                                                                                                                                  To comply with the hackathon rules, this section distinguishes what was built before the event from what was built during it. The Git tag `hackathon-start` marks the exact boundary.
 
 ### Pre-Hackathon: The Baseline
 
-- The original terminal-based number-guessing game (C).
-- The refactored C engine (`game.c` / `game.h`) and the `ctypes` Python bridge (`bridge.py`).
-- The initial logic layer (`cogsys_logic.py`) and 50 offline tests.
-- The initial Gemini prompt and JSON validator.
+                                                                                                                                                  - The original terminal-based number-guessing game (C).
+                                                                                                                                                  - The refactored C engine (`game.c` / `game.h`) and the `ctypes` Python bridge (`bridge.py`).
+                                                                                                                                                  - The initial logic layer (`cogsys_logic.py`) and 50 offline tests.
+                                                                                                                                                  - The initial Gemini prompt and JSON validator.
 
 ### Built During the Hackathon (November 2–7, 2026)
 
-- The entire Streamlit UI (`app.py`), including dark-mode CSS, dynamic themes, and a mobile-responsive grid.
-- The Rules Gate, footer, and game flow.
-- The **Ghost Bot** optimal-path simulator.
-- The **Naija Persona** prompt tuning and local fallback voice.
-- The **Pressure Mode** timer and timeout-penalty logic.
-- Audio integration (victory, defeat, and background music).
-- Cloud deployment and pre-compilation of `libgame.so` for Streamlit Community Cloud.
+                                                                                                                                                  - The entire Streamlit UI (`app.py`), including dark-mode CSS, dynamic themes, and a mobile-responsive grid (tested on ARM64/mobile).
+                                                                                                                                                  - The Rules Gate, footer, and game flow.
+                                                                                                                                                  - The **Ghost Bot** optimal-path simulator.
+                                                                                                                                                  - The **Naija Persona** prompt tuning and local fallback voice.
+                                                                                                                                                  - The **Pressure Mode** timer and timeout-penalty logic.
+                                                                                                                                                  - Audio integration (victory, defeat, and background music).
+                                                                                                                                                  - **Deployment Engineering:** Streamlit Cloud doesn't reliably ship `gcc`. We solved this by pre-compiling `libgame.so` locally and committing the binary. *(Note: If `game.c` is ever changed, the `.so` must be rebuilt and recommitted).*
 
-### ☁️ Deployment Engineering: The Precompiled C Engine
-
-One of the deployment challenges was ensuring that the C engine would work reliably on Streamlit Community Cloud.
-
-Rather than depending on the cloud environment to have GCC available and compile the shared library at runtime, the project includes a precompiled `libgame.so` binary.
-
-This allows the Python application to load the C engine directly through `ctypes`, avoiding a runtime compilation dependency and making deployment more reliable.
-
----
+                                                                                                                                                  ---
 
 ## 🚀 Running Locally
 
 ### Requirements
 
-- `gcc`
-- `make`
-- `python3`
+                                                                                                                                                  - `gcc`
+                                                                                                                                                  - `python3`
 
 ### Setup and Execution
 
-1. **Build the C library:**
+                                                                                                                                                  1. **Build the C library:**
 
-   ```bash
-   make
-   ```
+                                                                                                                                                  ```bash
+                                                                                                                                                  gcc -shared -fPIC -Wall -Wextra -Wpedantic -std=c99 -o libgame.so game.c
+                                                                                                                                                  ```
 
-2. **Install Python dependencies:**
+                                                                                                                                                  2. **Install Python dependencies:**
 
-   ```bash
-   pip install -r requirements.txt
-   ```
+                                                                                                                                                  ```bash
+                                                                                                                                                  pip install -r requirements.txt
+                                                                                                                                                  ```
 
-3. **Run the app:**
+                                                                                                                                                  3. **Run the app:**
 
-   ```bash
-   streamlit run app.py
-   ```
+                                                                                                                                                  ```bash
+                                                                                                                                                  streamlit run app.py
+                                                                                                                                                  ```
 
----
+                                                                                                                                                  ---
 
 ## 🧪 Testing
 
-The project has extensive test coverage:
+                                                                                                                                                  The project has extensive test coverage:
 
-- **C Engine:** `python3 test_engine.py` — 75 checks passing.
-- **Python Logic:** `python3 test_logic.py` — 50 checks passing.
+                                                                                                                                                  - **C Engine:** `python3 test_engine.py` — 75 checks passing.
+                                                                                                                                                  - **Python Logic:** `python3 test_logic.py` — 50 checks passing.
 
----
+                                                                                                                                                  ---
 
 ## 👨🏾💻 Author
 
-**Agbai Samuel Chibuike (SAM)**  
-200-Level Computer Science Student, Nnamdi Azikiwe University.
+                                                                                                                                                  **Agbai Samuel Chibuike (SAM)**  
+                                                                                                                                                  200-Level Computer Science Student, Nnamdi Azikiwe University.
 
-Developed for the **BUILDUP UNIZIK Hackathon 2026**.
+                                                                                                                                                  Developed for the **BUILDUP UNIZIK Hackathon 2026**.
+
+                                                                                                                                                  **Audio Credits:** "Champions" by Walen and "Summer Time" by Nebulite (Free To Use Music).
